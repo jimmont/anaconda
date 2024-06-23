@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" >
+<meta name="viewport" content="width=device-width, minimum-scale=1, initial-scale=1, user-scalable=yes">
+<title>rock, paper, scissors</title>
+<meta name="description" content="example using HTM with React to replace JSX and reduce work">
+<style>
+:root{
+	--blue: #5bf;
+	--lightbrown: #e18d00;
+	--brownish: #944c12;
+	--golden: #fc0;
+}
+html,body{margin:0;padding:0;min-width:320px;min-height:320px;box-sizing:border-box;background-color:#5bf;}
+body{
+	padding:1rem;min-height:100vh;min-width:100vw;background-color:#fff;
+	font-size:1rem;font-family:system, system-ui, -apple-system, ".SFNSText-Regular", "San Francisco", "Oxygen", "Ubuntu", "Roboto", "Segoe UI", "Helvetica Neue", "Lucida Grande", sans-serif; line-height: 1.3;
+	margin:0;padding:0;
+}
+pre, code{font-size:inherit;font-family:"SF Mono", "Monaco", "Inconsolata", "Fira Mono", "Droid Sans Mono", "Source Code Pro", "Lucida Console", monospace;}
+iframe{border: 1;}
+fieldset{border:0;padding:0;margin:0.2em 0 .5em 0;}
+label{user-select:none;}
+h1,h2,h3,h4,h5,h6, p{margin:0 0 1em 0;}
+
+header{
+	box-sizing:border-box;
+	position:sticky;z-index:111;top:0;width:100vw;left:0;right:0;background-color:rgba(255,255,255,0.9);border-bottom:1px dotted var(--lightbrown);
+	padding:0.5em;
+	display:flex;flex-wrap:wrap;align-items:baseline;
+}
+header > *{flex: 1 1 auto;}
+header b{flex: 0 0 5em;}
+my-favorites{flex:0 0 7em;}
+
+section[description]{columns: auto 22em;padding:1em;}
+</style>
+</head>
+<body>
+<header><b>rock, paper, scissors</b> <my-favorites title="favorite counts in a native Web Component"></my-favorites></header>
+
+<main>
+<the-game>
+
+</the-game>
+</section>
+</main>
+
+<script type=module>
+/* 
+security on the cheap
+https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html#Output_Encoding_Rules_Summary */
+function sanitizer(str, i, list){
+	return str + (this[i] ?? '').toString()
+	.replace(/&/g, '＆')
+	.replace(/</g, '﹤')
+	.replace(/>/g, '﹥')
+	.replace(/'/g, '’')
+	.replace(/"/g, '”')
+	.replace(/\//g, '／')
+	;
+}
+
+// usage sanitize`<div>${ data }</div>`;
+function sanitize(str, ...input){
+	return str.map(sanitizer, input).join('');
+}
+
+customElements.define('the-game', class TheGame extends HTMLElement{
+	constructor(){
+		super();
+		
+		this.game = {
+			 players: [{name: 'anyone', score: 0}, {name: 'computer', score: 0}]
+			,history: []
+			,turn: 0
+		};
+		this.restored = false;
+
+		this.attachShadow({mode:'open'}).innerHTML = `
+			<style>
+
+			:host(:hover){background-color:var(--golden, #ddd);position:relative;}
+			:slotted{font-weight:normal;}
+
+			:host section[players]{ opacity:0.5;}
+			:host([turn]) section[players]{ pointer-events: auto; opacity: 1; }
+			:host(:not([turn])) button[type=reset],
+			:host([turn]) button[type=submit]{ display:none;}
+			:host([turn]) ::slotted(the-player){opacity: 1; background-color: rgba(222, 222, 222, 0.7); }
+			:host([turn="1"]) ::slotted(the-player:nth-of-type(1)),
+			:host([turn="2"]) ::slotted(the-player:nth-of-type(2)){ pointer-events: auto; opacity: 1; background-color: rgba(255,255,255,1);}
+			</style>
+			<form>
+			<fieldset>
+				<slot name=turn>game on...</slot>
+				<button type=submit>start</button>
+				<button type=reset>reset</button>
+			</fieldset>
+			</form>
+
+			<section players>
+				<slot></slot>
+			</section>
+		`;
+
+		const $form = this.shadowRoot.querySelector('form');
+		const change = this._change.bind(this);
+		$form.addEventListener('submit', change);
+		$form.addEventListener('reset', change);
+		this.addEventListener('move', this._update);
+		this.addEventListener('update', this._update);
+	}
+	connectedCallback(){
+
+		try{
+			const { game } = this;
+
+			if(this.restored) throw 'done';
+			this.restored = true;
+
+			const restore = JSON.parse(localStorage.gameRPS);
+			const { turn, players, history} = restore;
+			game.players.forEach((player,i)=>Object.assign(player, players[i]));
+			game.history.push(...history);
+
+			this.turn = turn;
+
+		}catch(error){
+		}
+
+		this.render();
+		requestAnimationFrame(()=>{
+			this.dispatchEvent(new CustomEvent('next', {detail: this.turn, cancelable: true, composed: true, bubbles: true}));
+		});
+	}
+	get turn(){
+		return this.game.turn;
+	}
+	set turn(n=0){
+		if(isNaN(n)) return;
+		this.game.turn = n;
+		if(n > 0){
+			this.setAttribute('turn', n);
+		}else{
+			this.removeAttribute('turn');
+		}
+	}
+
+	_change(event){
+		event.preventDefault();
+		const {type, target} = event;
+
+		switch(type){
+		case 'submit':
+			this.turn = 1;
+		break;
+		case 'reset':
+			this.turn = 0;
+			this.game.players.forEach(player=>{ player.score = 0; player.move = ''; });
+			this.dispatchEvent(new CustomEvent('win', {detail: null, cancelable: true, composed: true, bubbles: true}));
+		break;
+		}
+		this.save();
+	}
+	_compare(a,b){
+		if(a===b) return 0;
+
+		if(
+			(a === 'rock' && b === 'scissors')
+			|| (a === 'paper' && b === 'rock')
+			|| (a === 'scissors' && b === 'paper')
+		) return 1;
+
+		return -1;
+	}
+	_update({type, detail, target, ...rest}){
+		const {index, move, name} = detail;
+		if(move){
+			// update turn, advance
+			let turn = this.turn + 1;
+			const { game } = this;
+			if(turn > 2){
+			// if both done: score, advance to next round (loop)
+				const [a,b] = game.players;
+				const move = [a.move, b.move];
+				a.move = b.move = '';
+				game.history.push(move);
+				let winner = null;
+				const win = this._compare(...move);
+				if(win){
+					if(win < 0){
+						winner = b;
+						b.score += 1;
+					}else{
+						winner = a;
+						a.score += 1;
+					}
+				}
+
+				this.turn = 1;
+
+				this.dispatchEvent(new CustomEvent('win', {detail: winner, cancelable: true, composed: true, bubbles: true}));
+			}else{
+			// next
+				this.turn = turn;
+				this.dispatchEvent(new CustomEvent('next', {detail: turn, cancelable: true, composed: true, bubbles: true}));
+			}
+			
+			// save
+		}else if(name){
+		}
+		this.save();
+
+	}
+	save(){
+		self.localStorage.gameRPS = JSON.stringify(this.game);
+	}
+	reset(){
+		localStorage.removeItem('gameRPS')
+		const { game } = this;
+		game.players = [];
+		game.history = [];
+
+		this.render();
+	}
+	render(){
+		cancelAnimationFrame(this._render);
+		this._render = requestAnimationFrame(()=>{
+			let players = this.querySelectorAll('the-player');
+			let i = 0;
+			const { game } = this;
+
+			while(i < 2){
+				let player = players[i];
+				if(!player){
+					player = this.ownerDocument.createElement('the-player');
+					player.index = i;
+					this.appendChild(player);
+				}
+				player.data = game.players[i];
+				i+=1;
+			}
+		});
+	}
+});
+customElements.define('the-player', class ThePlayer extends HTMLElement{
+	constructor(){
+		super();
+
+		this.data = null;
+
+		this.attachShadow({mode:'open'}).innerHTML = `
+			<style>
+			:host(:hover){background-color:var(--golden, #ddd);position:relative;}
+			:slotted{font-weight:normal;}
+
+
+			:host{display:block;}
+			:host([win]){ animation:450ms linear 0s 1 win; }
+			@keyframes win{ 0% {background-color: rgba(0, 128, 0, 0);} 33% {background-color:rgba(0, 128, 0, 0.3);} 75% {background-color:rgba(0,128,0,1);} 100% {background-color:rgba(0,128,0,0);} }
+			h3{position:sticky;z-index:11;top:3rem;background:rgba(255,255,255,0.9);padding:0.5em 0;}
+
+			:host{display:block;position:relative;}
+			p.description{max-height:1.5em;overflow:hidden;margin:0;}
+			:host(:hover){background-color:var/(--blue, #ddd);}
+			b[icon]{position:absolute;margin-inline-start:-1em;}
+			</style>
+			<slot>player</slot>
+			<form>
+				<input type=text placeholder=name name=name>
+				score <slot name=score></slot>
+				<fieldset>
+				<legend>choose</legend>
+				${ [`rock`,`paper`,`scissors`].map(type=> sanitize`<label><input type=radio name=weapon value="${ type }" ${ false ? 'checked':''}> ${ type }</label>`).join(` `) }
+				</fieldset>
+			</form>
+		`;
+		const $form = this.shadowRoot.querySelector('form');
+		const change = this.change.bind(this);
+		$form.addEventListener('change', change);
+		$form.addEventListener('submit', change);
+
+		this._next = this._next.bind(this);
+
+		this.addEventListener("animationend", this._animationend);
+	}
+	change(event){
+		const {type, target} = event;
+		event.preventDefault();
+		const { index = -1 } = this;
+		if(target.name === 'weapon'){
+			this.data.move = target.value;
+			this.dispatchEvent(new CustomEvent('update', {detail: {move: target.value, index}, cancelable: true, composed: true, bubbles: true}));
+		}else if(target.name === 'name'){
+			this.data.name = target.value.trim();
+			this.dispatchEvent(new CustomEvent('update', {detail: {name: target.value, index}, cancelable: true, composed: true, bubbles: true}));
+
+		}
+	}
+	connectedCallback(){
+		self.addEventListener('win', this._next);
+		self.addEventListener('next', this._next);
+		this.render();
+	}
+	disconnectedCallback(){
+		self.removeEventListener('win', this._next);
+		self.removeEventListener('next', this._next);
+	}
+	_next({type, detail}){
+		if(type === 'win') this.render({win:detail});
+		else if(type === 'next'){
+			// only player 'computer' does this
+			// detail is the turn/index
+			const { index, data } = this;
+			if(data.name !== 'computer' || (index + 1) !== detail) return;
+
+			const random = Math.floor(Math.random() * 3);
+			const move = this.shadowRoot.querySelectorAll(`input[name="weapon"]`)[random].value;
+			data.move = move;
+			this.render();
+			requestAnimationFrame(()=>{
+				this.dispatchEvent(new CustomEvent('update', {detail: {move, index}, cancelable: true, composed: true, bubbles: true}));
+			});
+		}
+	}
+	_animationend(){
+		this.removeAttribute('win');
+	}
+	render(detail){
+		cancelAnimationFrame(this._render);
+		this._render = requestAnimationFrame(()=>{
+			const { name = '', score = 0, move = '' } = this.data;
+			if(detail && detail.win){
+				if(this.data === detail.win){
+					this.setAttribute('win','');
+				}else{
+					this.removeAttribute('win');
+				}
+			}
+			this.shadowRoot.querySelector(`input[name="name"]`).value = name;
+			this.shadowRoot.querySelector(`slot[name="score"]`).textContent = score;
+			if(move){
+				this.shadowRoot.querySelector(`input[name="weapon"][value="${ move }"]`).checked = true;
+			}else{
+				const node = this.shadowRoot.querySelector('input[name="weapon"]:checked');
+				if(node) node.checked = false
+			}
+		});
+	}
+});
+
+</script>
+<noscript><p>please enable javascript</p></noscript>
+<!--
+ Rock, paper, scissors coding challenge
+This coding challenge is to implement a two-player game of rock, paper, scissors in the web browser.
+Rules
+HONOR RULES: You must do this challenge on your own, without assistance or review from others, and without copy-pasting from the Internet.
+TIME LIMIT: Timebox this challenge to 3 hours and send us within 3-5 working days from the date you receive this. You may submit your work earlier.
+SUBMISSION: Please send us your submission as a Github repository.
+Requirements
+The basic requirements for the game are:
+● Allow two players to enter their names
+● One of the players can also be the computer, i.e. player vs computer
+● Allow each to play a turn, one at a time, during which the player selects one of the option
+from rock, paper, scissors
+● During each turn notify who has won and increment the scores
+● In addition to implementing basic gameplay, the user must be able to save their game
+● You can choose to code the UI only or Backend only or both UI and Backend. However,
+timebox it to 3 hours and let us know how much you were able to achieve and what improvements you would have worked on if you had more time. We would like to read your documentation on this.
+● The goal is for players to play in the same browser.
+○ [out of scope] Multiplayer solution that allows players to join from different
+browsers Guidance
+● We don’t expect completeness. We are interested in your thought process and problem-solving approach. This coding challenge is a base for the next round of technical discussions.
+ 
+ ● We want to assess your coding skills and understand your decisions in the design and implementation of the assignment.
+● We value your time and the effort that goes into interviewing. We recommend not to spend more than 3 hours on this, however, it is up to you how you want to work on this coding challenge and come back to us with your solution. What we are interested in is hearing what you were able to achieve in these 3 hours and what further ideas and improvements you would have worked on if you had more time.
+● There is no objectively right or wrong approach, and we are not primarily interested in a complete or polished solution. We encourage you to timebox your work to 3 hours or less.
+
+
+
+-->
+</body></html>
