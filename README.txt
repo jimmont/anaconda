@@ -1,5 +1,6 @@
 
 this is a very rough solution asked by Anaconda for the problem referenced below
+https://jimmont.github.io/anaconda/
 
 to use it I served the index over http with this Deno script (but any http service will do):
 PORT=8080 && deno run --allow-read=./ --allow-net=localhost:$PORT https://raw.githubusercontent.com/sourdough/starter/main/tools/http.js --port=$PORT --index=index.html --www=./
